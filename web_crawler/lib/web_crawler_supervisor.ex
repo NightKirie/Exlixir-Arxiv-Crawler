@@ -120,14 +120,14 @@ defmodule WebCrawlerSupervisor.SubSupervisor do
 	end
 
 	def init(link) do
-		craw_sub_page = [ worker(WebCrawlerSupervisor.CrawSubPage, [link], [id: link, restart: :transient]) ]
+		craw_sub_page = [ worker(WebCrawlerSupervisor.CrawlSubPage, [link], [id: link, restart: :transient]) ]
 		supervise(craw_sub_page, strategy: :one_for_one)
 		#children
 	end
 end
 
 # Process for crawling a sub page
-defmodule WebCrawlerSupervisor.CrawSubPage do
+defmodule WebCrawlerSupervisor.CrawlSubPage do
 	def start_link(link) do
 		pid = spawn_link(__MODULE__, :init, [link])
 		{:ok, pid}
