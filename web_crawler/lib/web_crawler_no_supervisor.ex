@@ -1,4 +1,4 @@
-defmodule WebCrawlerSupervisor do
+defmodule WebCrawlerNoSupervisor do
 	@default_headers []
 	@default_options [follow_redirect: true, ssl: [{:versions, [:"tlsv1.2"]}]]
 	@default_url_front "https://arxiv.org/search/?query="
@@ -10,19 +10,15 @@ defmodule WebCrawlerSupervisor do
 			|> String.replace("\n", "")
 		url = URI.parse(@default_url_front <> author <> @default_url_end <> "0") 
 
-		context = set_context()
+		context = %{
+			headers: @default_headers,
+			options: @default_options
+		}
 
 		IO.puts "Process start time: " <> inspect(Time.utc_now)
 		get_links(url, context)
 		IO.puts "Process end time: " <> inspect(Time.utc_now)
   	end
-
-	def set_context() do
-		%{
-			headers: @default_headers,
-			options: @default_options
-		}
-	end
 
 	defp get_links(url, context) do
 		url
@@ -31,7 +27,7 @@ defmodule WebCrawlerSupervisor do
 		|> handle_response(url, context)
 	end
 
-	defp get_article_per_page(body) do
+	defp get_article_per_page({:ok, %{body: body}}) do
 		body
 		|> Floki.find("p.title")
 		|> Enum.map(fn paper -> 
@@ -43,6 +39,11 @@ defmodule WebCrawlerSupervisor do
 			|> String.trim
 			|> IO.puts
 			end)	
+	end
+
+	defp crawl_page(url, context) do
+		HTTPoison.get(url, context.headers, context.options)
+		|> get_article_per_page
 	end
 
   	defp handle_response({:ok, %{body: body}}, url, context) do
@@ -86,76 +87,77 @@ defmodule WebCrawlerSupervisor do
 			|> Kernel.<>(Integer.to_string(x*25))
 			end)
 
-		# Initialize a parent supervisor to start crawling other pages
-		WebCrawlerSupervisor.ParentSupervisor.start_link(page_link)
-		
 		# Get the article in the first page
-		get_article_per_page(body)
-	end
-
-end
-
-# Parent supervisor that supervise other sub supervisor
-defmodule WebCrawlerSupervisor.ParentSupervisor do
-	use Supervisor
-
-	def start_link(page_link) do
-		Supervisor.start_link(__MODULE__, page_link)
-	end
-
-	def init(page_link) do
-		sub_supervisors = Enum.map(page_link, fn(link) ->
-			worker(WebCrawlerSupervisor.SubSupervisor, [link], [id: link, restart: :temporary])
+		get_article_per_page({:ok, %{body: body}})
+		Enum.map(page_link, fn url ->
+			crawl_page(url, context)
 		end)
-		supervise(sub_supervisors, strategy: :one_for_one)
+
 	end
+
 end
 
-# Sub supervisor for each page crawling, prevent if that page can't crawl, won't bother other crawling processes
-defmodule WebCrawlerSupervisor.SubSupervisor do
-	use Supervisor
+# # Parent supervisor that supervise other sub supervisor
+# defmodule WebCrawler.ParentSupervisor do
+# 	use Supervisor
 
-	def start_link(link) do
-		Supervisor.start_link(__MODULE__, link, [max_restarts: 5, max_seconds: 600])
-	end
+# 	def start_link(page_link) do
+# 		Supervisor.start_link(__MODULE__, page_link)
+# 	end
 
-	def init(link) do
-		craw_sub_page = [ worker(WebCrawlerSupervisor.CrawSubPage, [link], [id: link, restart: :transient]) ]
-		supervise(craw_sub_page, strategy: :one_for_one)
-		#children
-	end
-end
+# 	def init(page_link) do
+# 		sub_supervisors = Enum.map(page_link, fn(link) ->
+# 			worker(WebCrawler.SubSupervisor, [link], [id: link, restart: :temporary])
+# 		end)
+# 		supervise(sub_supervisors, strategy: :one_for_one)
+# 	end
+# end
 
-# Process for crawling a sub page
-defmodule WebCrawlerSupervisor.CrawSubPage do
-	def start_link(link) do
-		pid = spawn_link(__MODULE__, :init, [link])
-		{:ok, pid}
-	end
+# # Sub supervisor for each page crawling, prevent if that page can't crawl, won't bother other crawling processes
+# defmodule WebCrawler.SubSupervisor do
+# 	use Supervisor
 
-	def init(link) do
-		IO.puts "Process start time: " <> inspect(Time.utc_now)
-		crawl_page(link)
-		IO.puts "Process end time: " <> inspect(Time.utc_now)
-	end
+# 	def start_link(link) do
+# 		Supervisor.start_link(__MODULE__, link, [max_restarts: 5, max_seconds: 600])
+# 	end
 
-	defp crawl_page(url) do
-		context = WebCrawlerSupervisor.set_context()
-		HTTPoison.get(url, context.headers, context.options)
-		|> get_article_per_page
-	end
+# 	def init(link) do
+# 		craw_sub_page = [ worker(WebCrawler.CrawSubPage, [link], [id: link, restart: :transient]) ]
+# 		supervise(craw_sub_page, strategy: :one_for_one)
+# 		#children
+# 	end
+# end
 
-	defp get_article_per_page({:ok, %{body: body}}) do
-		body
-		|> Floki.find("p.title")
-		|> Enum.map(fn paper -> 
-			paper
-			|> Tuple.to_list()
-			|> Enum.at(2)
-			|> Enum.at(0)
-			|> String.replace("\n", "")
-			|> String.trim
-			|> IO.puts
-			end)	
-	end
-end
+# # Process for crawling a sub page
+# defmodule WebCrawler.CrawSubPage do
+# 	def start_link(link) do
+# 		pid = spawn_link(__MODULE__, :init, [link])
+# 		{:ok, pid}
+# 	end
+
+# 	def init(link) do
+# 		IO.puts "Process start time: " <> inspect(Time.utc_now)
+# 		crawl_page(link)
+# 		IO.puts "Process end time: " <> inspect(Time.utc_now)
+# 	end
+
+# 	defp crawl_page(url) do
+# 		context = WebCrawler.set_context()
+# 		HTTPoison.get(url, context.headers, context.options)
+# 		|> get_article_per_page
+# 	end
+
+# 	defp get_article_per_page({:ok, %{body: body}}) do
+# 		body
+# 		|> Floki.find("p.title")
+# 		|> Enum.map(fn paper -> 
+# 			paper
+# 			|> Tuple.to_list()
+# 			|> Enum.at(2)
+# 			|> Enum.at(0)
+# 			|> String.replace("\n", "")
+# 			|> String.trim
+# 			|> IO.puts
+# 			end)	
+# 	end
+# end
