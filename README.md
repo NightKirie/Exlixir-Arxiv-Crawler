@@ -3,7 +3,7 @@
 
 ## Geting started
 
-1. Inside this folder
+1. Inside ./web_crawler
 2. Ubuntu:
 	1. Add Erlang Solutions repo: `wget https://packages.erlang-solutions.com/erlang-solutions_1.0_all.deb && sudo dpkg -i erlang-solutions_1.0_all.deb`
 	2. Run: `sudo apt-get update`
